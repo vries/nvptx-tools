@@ -835,7 +835,7 @@ process (FILE *in, FILE *out)
 
 /* Wait for a process to finish, and exit if a nonzero status is found.  */
 
-int
+static int
 collect_wait (const char *prog, struct pex_obj *pex)
 {
   int status;
