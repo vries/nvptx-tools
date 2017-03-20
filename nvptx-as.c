@@ -37,6 +37,7 @@
 #define HAVE_DECL_BASENAME 1
 #include <libiberty.h>
 #include <hashtab.h>
+#include <signal.h>
 
 #include <list>
 
@@ -833,10 +834,11 @@ process (FILE *in, FILE *out)
   write_stmts (out, rev_stmts (fns));
 }
 
-/* Wait for a process to finish, and exit if a nonzero status is found.  */
+/* Wait for a process to finish, and exit if a nonzero status is found, unless
+   process received signal in recover_signals.  */
 
-static void
-do_wait (const char *prog, struct pex_obj *pex)
+static int
+do_wait (const char *prog, struct pex_obj *pex, sigset_t *recover_signals)
 {
   int status;
 
@@ -849,6 +851,9 @@ do_wait (const char *prog, struct pex_obj *pex)
       if (WIFSIGNALED (status))
 	{
 	  int sig = WTERMSIG (status);
+	  if (recover_signals != NULL && sigismember(recover_signals, sig))
+	    return sig;
+
 	  fatal_error ("%s terminated with signal %d [%s]%s",
 		       prog, sig, strsignal(sig),
 		       WCOREDUMP(status) ? ", core dumped" : "");
@@ -860,14 +865,16 @@ do_wait (const char *prog, struct pex_obj *pex)
 	  if (status != 0)
 	    fatal_error ("%s returned %d exit status", prog, status);
 
-	  return;
+	  return 0;
 	}
     }
+
+  return 0;
 }
 
 /* Execute a program, and wait for the reply.  */
-static void
-fork_execute (const char *prog, char *const *argv)
+static int
+fork_execute (const char *prog, char *const *argv, sigset_t *recover_signals)
 {
   struct pex_obj *pex = pex_init (0, "nvptx-as", NULL);
   if (pex == NULL)
@@ -888,13 +895,30 @@ fork_execute (const char *prog, char *const *argv)
       else
 	fatal_error (errmsg);
     }
-  do_wait (prog, pex);
+  int sig = do_wait (prog, pex, recover_signals);
+
+  return sig;
+}
+
+static void
+common_argv(struct obstack *obstack, const char *outname,
+	    const char *smver)
+{
+  obstack_ptr_grow (obstack, "ptxas");
+  obstack_ptr_grow (obstack, "-c");
+  obstack_ptr_grow (obstack, "-o");
+  obstack_ptr_grow (obstack, "/dev/null");
+  obstack_ptr_grow (obstack, outname);
+  obstack_ptr_grow (obstack, "--gpu-name");
+  obstack_ptr_grow (obstack, smver);
+  obstack_ptr_grow (obstack, "-O0");
 }
 
 static struct option long_options[] = {
   {"traditional-format",     no_argument, 0,  0 },
   {"save-temps",  no_argument,       0,  0 },
   {"no-verify",  no_argument,       0,  0 },
+  {"no-retry",  no_argument,       0,  0 },
   {"help", no_argument, 0, 'h' },
   {"version", no_argument, 0, 'V' },
   {0,         0,                 0,  0 }
@@ -908,7 +932,8 @@ main (int argc, char **argv)
   bool verbose __attribute__((unused)) = false;
   bool verify = true;
   const char *smver = "sm_30";
-
+  bool retry = true;
+  
   int o;
   int option_index = 0;
   while ((o = getopt_long (argc, argv, "o:I:m:v", long_options, &option_index)) != -1)
@@ -918,6 +943,8 @@ main (int argc, char **argv)
 	case 0:
 	  if (option_index == 2)
 	    verify = false;
+	  else if (option_index == 3)
+	    retry = false;
 	  break;
 	case 'v':
 	  verbose = true;
@@ -943,6 +970,7 @@ Options:\n\
   -o FILE               Write output to FILE\n\
   -v                    Be verbose\n\
   --no-verify           Do not verify output is acceptable to ptxas\n\
+  --no-retry            If ptxas crashes, do not retry with alternate code generation\n\
   --help                Print this help and exit\n\
   --version             Print version number and exit\n\
 \n\
@@ -985,17 +1013,34 @@ This program has absolutely no warranty.\n",
     {
       struct obstack argv_obstack;
       obstack_init (&argv_obstack);
-      obstack_ptr_grow (&argv_obstack, "ptxas");
-      obstack_ptr_grow (&argv_obstack, "-c");
-      obstack_ptr_grow (&argv_obstack, "-o");
-      obstack_ptr_grow (&argv_obstack, "/dev/null");
-      obstack_ptr_grow (&argv_obstack, outname);
-      obstack_ptr_grow (&argv_obstack, "--gpu-name");
-      obstack_ptr_grow (&argv_obstack, smver);
-      obstack_ptr_grow (&argv_obstack, "-O0");
+      common_argv (&argv_obstack, outname, smver);
       obstack_ptr_grow (&argv_obstack, NULL);
       char *const *new_argv = XOBFINISH (&argv_obstack, char *const *);
-      fork_execute (new_argv[0], new_argv);
+
+      sigset_t recover_signals;
+      sigemptyset(&recover_signals);
+      if (retry)
+	sigaddset(&recover_signals, SIGSEGV);
+
+      int sig = fork_execute (new_argv[0], new_argv, &recover_signals);
+      if (sig != 0)
+	{
+	  obstack_init (&argv_obstack);
+	  common_argv (&argv_obstack, outname, smver);
+
+	  /* Try CU_JIT_NEW_SM3X_OPT.  */
+	  obstack_ptr_grow (&argv_obstack, "-ori");
+
+	  /* Kludge: Silence ptxas warning : '-ori' is an unsupported option, it
+	     will be removed in future release and is not recommended.  */
+	  obstack_ptr_grow (&argv_obstack, "-w");
+
+	  obstack_ptr_grow (&argv_obstack, NULL);
+	  new_argv = XOBFINISH (&argv_obstack, char *const *);
+
+	  fork_execute (new_argv[0], new_argv, NULL);
+	}
+
     }
   return 0;
 }
