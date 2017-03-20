@@ -835,8 +835,8 @@ process (FILE *in, FILE *out)
 
 /* Wait for a process to finish, and exit if a nonzero status is found.  */
 
-static int
-collect_wait (const char *prog, struct pex_obj *pex)
+static void
+do_wait (const char *prog, struct pex_obj *pex)
 {
   int status;
 
@@ -855,21 +855,15 @@ collect_wait (const char *prog, struct pex_obj *pex)
 	}
 
       if (WIFEXITED (status))
-	return WEXITSTATUS (status);
-    }
-  return 0;
-}
+	{
+	  status = WEXITSTATUS (status);
+	  if (status != 0)
+	    fatal_error ("%s returned %d exit status", prog, status);
 
-static void
-do_wait (const char *prog, struct pex_obj *pex)
-{
-  int ret = collect_wait (prog, pex);
-  if (ret != 0)
-    {
-      fatal_error ("%s returned %d exit status", prog, ret);
+	  return;
+	}
     }
 }
-
 
 /* Execute a program, and wait for the reply.  */
 static void
