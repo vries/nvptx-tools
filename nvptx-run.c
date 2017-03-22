@@ -66,7 +66,7 @@ fatal_unless_success (CUresult r, const char *err)
   fatal_error ("%s: %s (%s, %d)", err, s, n, (int) r);
 }
 
-static size_t jitopt_lineinfo, jitopt_debuginfo, jitopt_optimize = 4;
+static size_t jitopt_lineinfo, jitopt_debuginfo, jitopt_optimize = 4, jitopt_ori;
 
 static void
 compile_file (FILE *f, CUmodule *phModule, CUfunction *phKernel)
@@ -79,12 +79,14 @@ compile_file (FILE *f, CUmodule *phModule, CUfunction *phKernel)
     CU_JIT_GENERATE_LINE_INFO,
     CU_JIT_GENERATE_DEBUG_INFO,
     CU_JIT_OPTIMIZATION_LEVEL,
+    CU_JIT_NEW_SM3X_OPT
   };
   void *optvals[] = {
     elog, (void*) sizeof elog,
     (void*) jitopt_lineinfo,
     (void*) jitopt_debuginfo,
     (void*) jitopt_optimize,
+    (void*) jitopt_ori,
   };
   CUlinkState linkstate;
 
@@ -143,6 +145,7 @@ static const struct option long_options[] =
     { "heap-size", required_argument, 0, 'H' },
     { "lanes", required_argument, 0, 'L' },
     { "optlevel", required_argument, 0, 'O' },
+    { "ori", no_argument, 0, 'R' },
     { "lineinfo", no_argument, 0, 'g' },
     { "debuginfo", no_argument, 0, 'G' },
     { "help", no_argument, 0, 'h' },
@@ -179,6 +182,9 @@ main (int argc, char **argv)
 	  if (jitopt_optimize > 4 || optarg[1] != 0)
 	    fatal_error ("invalid optimization level");
 	  break;
+	case 'R':
+	  jitopt_ori = 1;
+	  break;
 	case 'g':
 	  jitopt_lineinfo = 1;
 	  break;
@@ -193,6 +199,7 @@ Options:\n\
   -H, --heap-size N     Set GPU heap size to N (default: 256 MiB)\n\
   -L, --lanes N         Launch N lanes (for testing gcc -muniform-simt)\n\
   -O, --optlevel N      Pass PTX JIT option to set optimization level N\n\
+  -R, --ori             Pass PTX JIT option CU_JIT_NEW_SM3X_OPT to change code generator\n\
   -g, --lineinfo        Pass PTX JIT option to generate line information\n\
   -G, --debuginfo       Pass PTX JIT option to generate debug information\n\
   --help                Print this help and exit\n\
