@@ -312,6 +312,16 @@ This program has absolutely no warranty.\n",
   fatal_unless_success (r, "could not get available memory");
   report_val (stderr, "Total device memory", mem);
 
+  int sm_count;
+  r = cuDeviceGetAttribute (&sm_count,
+			    CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, dev);
+  fatal_unless_success (r, "could not get SM count");
+
+  int thread_max;
+  r = cuDeviceGetAttribute
+    (&thread_max, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, dev);
+  fatal_unless_success (r, "could not get max threads per SM count");
+
   if (verbose)
     {
       size_t free_mem;
@@ -324,6 +334,8 @@ This program has absolutely no warranty.\n",
       cuCtxGetLimit (&default_stack_size, CU_LIMIT_STACK_SIZE);
       fatal_unless_success (r, "could not get default stack size");
       print_val (stderr, "Default stack size", default_stack_size);
+      print_val (stderr, "Estimated allocation for default stack size",
+		 default_stack_size * sm_count * thread_max);
 
       size_t default_heap_size;
       cuCtxGetLimit (&default_heap_size, CU_LIMIT_MALLOC_HEAP_SIZE);
@@ -336,13 +348,7 @@ This program has absolutely no warranty.\n",
       /* It appears that CUDA driver sometimes accounts memory as if stacks
          were reserved for the maximum number of threads the device can host,
 	 even if only a few are launched.  Compute the default accordingly.  */
-      int sm_count, thread_max;
-      r = cuDeviceGetAttribute (&sm_count,
-				CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, dev);
-      fatal_unless_success (r, "could not get SM count");
-      r = cuDeviceGetAttribute
-	(&thread_max, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, dev);
-      fatal_unless_success (r, "could not get max threads per SM count");
+
       /* Subtract heap size and a 128 MiB extra.  */
       mem -= heap_size + 128 * 1024 * 1024;
       mem /= sm_count * thread_max;
@@ -355,6 +361,8 @@ This program has absolutely no warranty.\n",
   r = cuCtxSetLimit(CU_LIMIT_STACK_SIZE, stack_size);
   fatal_unless_success (r, "could not set stack limit");
   report_val (stderr, "Set stack size", stack_size);
+  report_val (stderr, "Estimated allocation for set stack size",
+	      default_stack_size * sm_count * thread_max);
 
   r = cuCtxSetLimit(CU_LIMIT_MALLOC_HEAP_SIZE, heap_size);
   fatal_unless_success (r, "could not set heap limit");
